@@ -1,0 +1,3 @@
+REPORT
+{% for it in items %}- {{ it }} x{{ factor }} = {{ it|length * factor }}
+{% endfor %}END
