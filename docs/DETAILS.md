@@ -147,9 +147,10 @@ Other things the generator does:
   gets a two-compare overflow check instead of a 128-bit one.
 
 Each compiled function keeps a real Python function object whose body forwards
-to the native code, so signatures, defaults, keyword arguments, decorators and
-`inspect` keep working. Anything the generator does not support stays as
-bytecode, per function, and still runs.
+to the native code, so signatures, defaults, keyword arguments, decorators,
+docstrings and `inspect` keep working. `inspect.getdoc`, `pydoc.help` and
+`doctest` see exactly what they see under the interpreter. Anything the
+generator does not support stays as bytecode, per function, and still runs.
 
 ## Measurements
 
@@ -598,6 +599,20 @@ registered with the loader; and a runtime list append helper would have handed
 raising. All three are fixed and the whole gate, 67 suite checks, three
 interpreter corpora and the venv stress builds, passes on the result.
 
+Two more sat behind a plain `import doctest`, and both are worth naming
+because neither showed up at build time. The trampoline that gives every
+natively compiled function its Python function object was rebuilt from a
+generated one line body, and a function's `__doc__` comes from the first entry
+of its code object's constants, so every compiled function silently lost its
+docstring: `pydoc.help` and `inspect.getdoc` came back empty, and
+`doctest.testmod` reported zero tests attempted where the interpreter found
+them. The docstring is now carried into the trampoline's constants. The second
+was the exclude list itself: `doctest` sat on it, so a program that imported it
+built cleanly and then died with `ModuleNotFoundError`. The fix is the rule
+described under what gets bundled, that a default exclude never applies to a
+module your own code imports directly, which closes the whole class rather
+than that one entry.
+
 ## Building the toolchain
 
 Needs Visual Studio with the C++ workload. The script finds it.
@@ -692,9 +707,19 @@ else is reachable with `--add-data SRC;DEST` and `--hidden-import`.
 
 Three rules keep the closure from exploding: imports inside
 `if __name__ == "__main__":` are ignored, `tests/` directories are collected but
-not scanned, and build tooling such as `setuptools`, `pip`, `pytest` and CPython's
-own `test` package is excluded by default. The exclude list holds build time
-tools only. Modules that libraries import at run time are never on it, because
+not scanned, and tooling that only ever arrives as baggage, `setuptools`, `pip`,
+`pytest`, CPython's own `test` package and test oriented stdlib modules such as
+`doctest`, is excluded by default.
+
+That default can never break your program, because it only applies to modules
+something else dragged in. Anything your own code imports directly is always
+kept, even when it is on the exclude list: `import doctest` in your script
+bundles `doctest`, exactly as it would run under the interpreter. Only an
+explicit `--exclude` overrides that, since then you asked for it. The rule
+matters because the failure mode it prevents is silent: the build succeeds and
+the executable dies at run time, on a program the interpreter runs fine.
+
+Modules that libraries import at run time are never excluded either, because
 excluding one breaks the library rather than shrinking the build: `scipy`
 imports `pydoc`, and excluding it cost a `ModuleNotFoundError` in exchange for
 230 KB.
@@ -810,6 +835,9 @@ build, and cross checks every integer result against CPython.
   numpy among them. Prefer the default or `-O`.
 - The first run of a one file build pays the extraction cost. Use `--onedir` when
   that matters more than shipping a single file.
+- The builtin `help` is not defined in a frozen build, because the executable
+  runs isolated and `site`, which installs that name, never runs. `pydoc.help`
+  is the same function and works normally; docstrings themselves are intact.
 - Windows Defender heuristics sometimes flag self extracting executables,
   including this one and PyInstaller's. Signing the output, or an exclusion for
   your build directory, is the practical answer. `--onedir` does not trip it.
