@@ -8,7 +8,7 @@
 
 static cpy_py       PY;
 static cpy_itemlist ITEMS;
-static cpy_set       SEEN_MOD, EXCLUDES, HIDDEN, BUILTINS, MISSING, NATSEEN;
+static cpy_set       SEEN_MOD, EXCLUDES, HIDDEN, BUILTINS, MISSING, NATSEEN, USER_EX;
 static cpy_set       DYNPKG, DYNPKG_DONE;
 static char       **QUEUE;
 static int          QN, QCAP;
@@ -221,6 +221,17 @@ static void top_of(const char *dotted, char *out, size_t n)
     out[l] = 0;
 }
 
+static void keep_app_import(const char *dotted)
+{
+    char top[256];
+    top_of(dotted, top, sizeof(top));
+    if (!cpy_set_has(&EXCLUDES, top)) return;
+    if (cpy_set_has(&USER_EX, top) || cpy_set_has(&HIDDEN, top)) return;
+    cpy_set_add(&HIDDEN, top);
+    if (VERBOSE)
+        fprintf(stderr, "  keeping %s, imported directly by your code\n", top);
+}
+
 static void on_import(void *ud, const char *name, size_t len, size_t full, int level)
 {
     char buf[512];
@@ -297,6 +308,7 @@ static void on_import(void *ud, const char *name, size_t len, size_t full, int l
 
     strncpy(LAST_FROM, buf, sizeof(LAST_FROM) - 1);
     LAST_FROM[sizeof(LAST_FROM) - 1] = 0;
+    if (SCAN_APP) keep_app_import(buf);
     if (cpy_set_has(&SEEN_MOD, buf)) return;
     queue_push(buf);
 }
@@ -2149,6 +2161,7 @@ int wmain(int argc, wchar_t **argv)
 
     cpy_set_init(&SEEN_MOD, 4096);
     cpy_set_init(&EXCLUDES, 256);
+    cpy_set_init(&USER_EX, 256);
     cpy_set_init(&HIDDEN, 256);
     cpy_set_init(&NATSEEN, 1024);
     cpy_set_init(&DYNPKG, 256);
@@ -2200,6 +2213,7 @@ int wmain(int argc, wchar_t **argv)
         } else if (!wcscmp(a, L"--exclude") && i + 1 < argc) {
             char *m = cpy_w_to_utf8(argv[++i], -1);
             cpy_set_add(&EXCLUDES, m);
+            cpy_set_add(&USER_EX, m);
         } else if (!wcscmp(a, L"--add-data") && i + 1 < argc) {
             if (ndata < 64) datas[ndata++] = argv[++i];
         } else if (!wcscmp(a, L"--no-compress")) {

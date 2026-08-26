@@ -4855,6 +4855,28 @@ static PyObj make_trampoline(nc_ctx *c, PyObj code, int index, const char *name)
             PyObj v = getattr_(c, code, keys[q]);
             if (v) { PY->PyDict_SetItemString(kw, keys[q], v); PY->Py_DecRef(v); }
         }
+        {
+            PyObj oc = getattr_(c, code, "co_consts");
+            PyObj tc = getattr_(c, tramp, "co_consts");
+            cpy_ssize tn = tc ? PY->PyTuple_Size(tc) : 0;
+            if (oc && tc && PY->PyTuple_Size(oc) >= 1 && tn >= 1) {
+                PyObj doc = PY->PyTuple_GetItem(oc, 0);
+                if (doc && PY->PyObject_IsInstance(doc, c->t_str) == 1) {
+                    PyObj nk = PY->PyTuple_New(tn);
+                    cpy_ssize z;
+                    for (z = 0; z < tn; z++) {
+                        PyObj e = z ? PY->PyTuple_GetItem(tc, z) : doc;
+                        PY->Py_IncRef(e);
+                        PY->PyTuple_SetItem(nk, z, e);
+                    }
+                    PY->PyDict_SetItemString(kw, "co_consts", nk);
+                    PY->Py_DecRef(nk);
+                }
+            }
+            PY->PyErr_Clear();
+            if (oc) PY->Py_DecRef(oc);
+            if (tc) PY->Py_DecRef(tc);
+        }
         out = PY->PyObject_Call(rep, empty, kw);
         PY->Py_DecRef(rep);
         PY->Py_DecRef(kw);
